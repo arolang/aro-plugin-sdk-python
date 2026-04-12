@@ -27,6 +27,7 @@ Quick start::
 
 from .decorators import (
     action,
+    export_abi,
     init,
     on_event,
     plugin,
@@ -52,6 +53,7 @@ __all__ = [
     "on_event",
     "init",
     "shutdown",
+    "export_abi",
     # Core types
     "AROInput",
     "OutputBuilder",

@@ -305,3 +305,62 @@ def get_qualifier(name: str) -> Optional[Callable]:
 def get_event_handlers(event: str) -> List[Callable]:
     """Return all handlers registered for *event*."""
     return _event_registry.get(event, [])
+
+
+def export_abi(module_dict: Dict[str, Any]) -> None:
+    """Generate backward-compatible module-level functions for the ARO runtime.
+
+    The ARO runtime's PythonPluginHost expects:
+    - ``aro_plugin_info()`` at module level
+    - ``aro_action_<name>(input_json)`` for each action
+    - ``aro_plugin_qualifier(qualifier, input_json)`` if qualifiers exist
+
+    Call this at the end of your plugin module::
+
+        from aro_plugin_sdk.decorators import export_abi
+        export_abi(globals())
+    """
+    import json as _json
+
+    from .input import AROInput as _AROInput
+
+    # aro_plugin_info
+    def _aro_plugin_info():
+        return get_plugin_info()
+
+    module_dict["aro_plugin_info"] = _aro_plugin_info
+
+    # aro_action_<name> for each registered action
+    for action_meta in _actions:
+        action_name = action_meta["name"]
+        fn = action_meta.get("_fn")
+        if fn is None:
+            continue
+        # Convert action name to snake_case for function name
+        snake = action_name.replace("-", "_").replace(" ", "_").lower()
+
+        def _make_action_fn(handler):
+            def _action_fn(input_json):
+                params = _json.loads(input_json) if isinstance(input_json, str) else input_json
+                inp = _AROInput(params)
+                result = handler(inp)
+                return _json.dumps(result)
+            return _action_fn
+
+        module_dict[f"aro_action_{snake}"] = _make_action_fn(fn)
+
+    # aro_plugin_qualifier if qualifiers exist
+    if _qualifiers:
+        def _aro_plugin_qualifier(qualifier_name, input_json):
+            params = _json.loads(input_json) if isinstance(input_json, str) else input_json
+            fn = get_qualifier(qualifier_name)
+            if fn is None:
+                return _json.dumps({"error": f"Unknown qualifier: {qualifier_name}"})
+            inp = _AROInput(params)
+            try:
+                result = fn(inp)
+                return _json.dumps({"result": result})
+            except Exception as e:
+                return _json.dumps({"error": str(e)})
+
+        module_dict["aro_plugin_qualifier"] = _aro_plugin_qualifier
